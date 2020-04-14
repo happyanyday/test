@@ -26,34 +26,23 @@ import os,time,gc
 import pandas as pd
 import autohpo
 import pickle
-'''
-model_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-df = pd.read_pickle(model_dir + '/m5_data_FIRST_DAY_1.pkl')
-df.shape
-df.head()
-
-df.info()
-
-create_fea(df)
-df.shape
-
-df.info()
-
-df.head()
-
-df.dropna(inplace=True)
-df.shape
-cat_feats = ['item_id', 'dept_id', 'store_id', 'cat_id', 'state_id'] + ["event_name_1", "event_name_2",
-                                                                            "event_type_1", "event_type_2"]
-useless_cols = ["id", "date", "sales", "d", "wm_yr_wk", "weekday"]
-
-train_cols = df.columns[~df.columns.isin(useless_cols)]
-
-X_train = df[train_cols]
-y_train = df["sales"]
-'''
+from  datetime import datetime, timedelta
 # FYI: Objective functions can take additional arguments
 # (https://autohpo.readthedocs.io/en/stable/faq.html#objective-func-additional-args).
+
+CAL_DTYPES={"event_name_1": "category", "event_name_2": "category", "event_type_1": "category",
+         "event_type_2": "category", "weekday": "category", 'wm_yr_wk': 'int16', "wday": "int16",
+        "month": "int16", "year": "int16", "snap_CA": "float32", 'snap_TX': 'float32', 'snap_WI': 'float32' }
+PRICE_DTYPES = {"store_id": "category", "item_id": "category", "wm_yr_wk": "int16","sell_price":"float32" }
+
+pd.options.display.max_columns = 50
+NUM_LEAVES = 76
+
+h = 28
+max_lags = 57
+tr_last = 1913
+fday = datetime(2016,4, 25)
+fday
 def objective(trial):
     # data, target = sklearn.datasets.load_breast_cancer(return_X_y=True)
     # train_x, test_x, train_y, test_y = train_test_split(data, target, test_size=0.25)
@@ -196,127 +185,110 @@ def create_fea(dt):
         else:
             dt[date_feat_name] = getattr(dt["date"].dt, date_feat_func).astype("int16")
 
-def test_predict():
-    directory = "/Users/apple/automl/auto-hpo/input/data/PredictFutureSales/"
-    test = pd.read_csv(directory + 'test.csv').set_index('ID')
-    data = pd.read_pickle('/Users/apple/automl/auto-hpo/examples/predictfuturesales/data.pkl')
+def create_dt(is_train=True, nrows=None, first_day=1200):
+    #directory = "/Users/apple/automl/auto-hpo/input/data/m5faccuracy"
+    directory = '/pfs/auto-hpo/auto-hpo/input/data/m5'
+    prices = pd.read_csv(directory+"/sell_prices.csv", dtype=PRICE_DTYPES)
+    for col, col_dtype in PRICE_DTYPES.items():
+        if col_dtype == "category":
+            prices[col] = prices[col].cat.codes.astype("int16")
+            prices[col] -= prices[col].min()
 
-    data = data[[
-        'date_block_num',
-        'shop_id',
-        'item_id',
-        'item_cnt_month',
-        'city_code',
-        'item_category_id',
-        'type_code',
-        'subtype_code',
-        'item_cnt_month_lag_1',
-        'item_cnt_month_lag_2',
-        'item_cnt_month_lag_3',
-        'item_cnt_month_lag_6',
-        'item_cnt_month_lag_12',
-        'date_avg_item_cnt_lag_1',
-        'date_item_avg_item_cnt_lag_1',
-        'date_item_avg_item_cnt_lag_2',
-        'date_item_avg_item_cnt_lag_3',
-        'date_item_avg_item_cnt_lag_6',
-        'date_item_avg_item_cnt_lag_12',
-        'date_shop_avg_item_cnt_lag_1',
-        'date_shop_avg_item_cnt_lag_2',
-        'date_shop_avg_item_cnt_lag_3',
-        'date_shop_avg_item_cnt_lag_6',
-        'date_shop_avg_item_cnt_lag_12',
-        'date_cat_avg_item_cnt_lag_1',
-        'date_shop_cat_avg_item_cnt_lag_1',
-        # 'date_shop_type_avg_item_cnt_lag_1',
-        # 'date_shop_subtype_avg_item_cnt_lag_1',
-        'date_city_avg_item_cnt_lag_1',
-        'date_item_city_avg_item_cnt_lag_1',
-        # 'date_type_avg_item_cnt_lag_1',
-        # 'date_subtype_avg_item_cnt_lag_1',
-        'delta_price_lag',
-        'month',
-        'days',
-        'item_shop_last_sale',
-        'item_last_sale',
-        'item_shop_first_sale',
-        'item_first_sale',
-    ]]
+    cal = pd.read_csv(directory+"/calendar.csv", dtype=CAL_DTYPES)
+    cal["date"] = pd.to_datetime(cal["date"])
+    for col, col_dtype in CAL_DTYPES.items():
+        if col_dtype == "category":
+            cal[col] = cal[col].cat.codes.astype("int16")
+            cal[col] -= cal[col].min()
 
-    X_test = data[data.date_block_num == 34].drop(['item_cnt_month'], axis=1)
-    del data
-    gc.collect();
+    start_day = max(1 if is_train else tr_last - max_lags, first_day)
+    numcols = [f"d_{day}" for day in range(start_day, tr_last + 1)]
+    catcols = ['id', 'item_id', 'dept_id', 'store_id', 'cat_id', 'state_id']
+    dtype = {numcol: "float32" for numcol in numcols}
+    dtype.update({col: "category" for col in catcols if col != "id"})
+    dt = pd.read_csv(directory+"/sales_train_validation.csv",
+                     nrows=nrows, usecols=catcols + numcols, dtype=dtype)
 
-    ts = time.time()
-    print(ts)
-    model = pickle.load(open('/Users/apple/automl/auto-hpo/output/xgbmodel/1_model_train.pkl','rb'))
-    Y_test = model.predict(X_test).clip(0, 20)
+    for col in catcols:
+        if col != "id":
+            dt[col] = dt[col].cat.codes.astype("int16")
+            dt[col] -= dt[col].min()
 
-    submission = pd.DataFrame({
-        "ID": test.index,
-        "item_cnt_month": Y_test
-    })
-    submission.to_csv('gbm_submission.csv', index=False)
-def test_cfp_predict():
+    if not is_train:
+        for day in range(tr_last + 1, tr_last + 28 + 1):
+            dt[f"d_{day}"] = np.nan
+
+    dt = pd.melt(dt,
+                 id_vars=catcols,
+                 value_vars=[col for col in dt.columns if col.startswith("d_")],
+                 var_name="d",
+                 value_name="sales")
+
+    dt = dt.merge(cal, on="d", copy=False)
+    dt = dt.merge(prices, on=["store_id", "item_id", "wm_yr_wk"], copy=False)
+
+    return dt
+
+
+
+def m5_predict():
     # directory = "/Users/apple/automl/auto-hpo/input/data/PredictFutureSales/"
     #
     # data = pd.read_pickle('/Users/apple/automl/auto-hpo/examples/predictfuturesales/cfp_data.pkl')
+    data_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+    df = pd.read_pickle(data_dir + '/m5_data_FIRST_DAY_1.pkl')
+    df = create_dt(False)
+    df.to_pickle('m5_test_data.pkl')
+    useless_cols = ["id", "date", "sales", "d", "wm_yr_wk", "weekday"]
+    train_cols = df.columns[~df.columns.isin(useless_cols)]
+    #lgb = pickle.load(open('/Users/apple/automl/auto-hpo/output/xgbmodel/18_model_train.pkl', 'rb'))
+    lgb = pickle.load(open('/pfs/auto-hpo/auto-hpo/output/model/gbm/18_model_train.pkl', 'rb'))
 
-    model_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-    data = pd.read_pickle(model_dir+'/cfp_data.pkl')
-    test = pd.read_csv('/pfs/auto-hpo/auto-hpo/input/data/PredictFutureSales/test.csv')  # .set_index('ID')
+    alphas = [1.035, 1.03, 1.025, 1.02]
+    weights = [1 / len(alphas)] * len(alphas)
+    sub = 0.
 
-    # test.loc[test.shop_id == 0, "shop_id"] = 57
-    #
-    # test.loc[test.shop_id == 1, "shop_id"] = 58
-    #
-    # test.loc[test.shop_id == 11, "shop_id"] = 10
-    #
-    # test.loc[test.shop_id == 40, "shop_id"] = 39
-    # test["date_block_num"] = 34
-    # test["date_block_num"] = test["date_block_num"].astype(np.int8)
-    # test["shop_id"] = test.shop_id.astype(np.int8)
-    # test["item_id"] = test.item_id.astype(np.int16)
-    X_test = data[data.date_block_num == 34].drop(['item_cnt_month'], axis=1)
-    del data
-    gc.collect();
+    for icount, (alpha, weight) in enumerate(zip(alphas, weights)):
 
-    ts = time.time()
-    print(ts)
-    model = pickle.load(open('/pfs/auto-hpo/auto-hpo/output/xgbmodel/118_xgb_train.pkl','rb'))
-    Y_test = model.predict(xgb.DMatrix(X_test)).clip(0, 20)
+        te = create_dt(False) 
+        cols = [f"F{i}" for i in range(1, 29)]
 
-    submission = pd.DataFrame({
-        "ID": test.index,
-        "item_cnt_month": Y_test
-    })
-    submission.to_csv('cfp_118_submission.csv', index=False)
-model_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-df = pd.read_pickle(model_dir + '/m5_data_FIRST_DAY_1.pkl')
-df.shape
-df.head()
+        for tdelta in range(0, 28):
+            day = fday + timedelta(days=tdelta)
+            print(icount, day)
+            tst = te[(te.date >= day - timedelta(days=max_lags)) & (te.date <= day)].copy()
+            create_fea(tst)
+            tst = tst.loc[tst.date == day, train_cols]
+            te.loc[te.date == day, "sales"] = alpha * lgb.predict(tst)  # magic multiplier by kyakovlev
 
-df.info()
+        te_sub = te.loc[te.date >= fday, ["id", "sales"]].copy()
+        #     te_sub.loc[te.date >= fday+ timedelta(days=h), "id"] = te_sub.loc[te.date >= fday+timedelta(days=h),
+        #                                                                           "id"].str.replace("validation$", "evaluation")
+        te_sub["F"] = [f"F{rank}" for rank in te_sub.groupby("id")["id"].cumcount() + 1]
+        te_sub = te_sub.set_index(["id", "F"]).unstack()["sales"][cols].reset_index()
+        te_sub.fillna(0., inplace=True)
+        te_sub.sort_values("id", inplace=True)
+        te_sub.reset_index(drop=True, inplace=True)
+        te_sub.to_csv(f"submission_m5_{icount}.csv", index=False)
+        if icount == 0:
+            sub = te_sub
+            sub[cols] *= weight
+        else:
+            sub[cols] += te_sub[cols] * weight
+        print(icount, alpha, weight)
 
-create_fea(df)
-df.shape
+    sub2 = sub.copy()
+    sub2["id"] = sub2["id"].str.replace("validation$", "evaluation")
+    sub = pd.concat([sub, sub2], axis=0, sort=False)
+    sub.to_csv("m5_18_submission.csv", index=False)
 
-df.info()
+    sub.head(10)
 
-df.head()
+    sub.id.nunique(), sub["id"].str.contains("validation$").sum()
 
-df.dropna(inplace=True)
-df.shape
-cat_feats = ['item_id', 'dept_id', 'store_id', 'cat_id', 'state_id'] + ["event_name_1", "event_name_2",
-                                                                            "event_type_1", "event_type_2"]
-useless_cols = ["id", "date", "sales", "d", "wm_yr_wk", "weekday"]
-
-train_cols = df.columns[~df.columns.isin(useless_cols)]
-
-X_train = df[train_cols]
-y_train = df["sales"]
-
+    sub.shape
 if __name__ == '__main__':
+    '''
     study = autohpo.create_study()
     study.optimize(objective, n_trials=100)
     print('Number of finished trials: {}'.format(len(study.trials)))
@@ -327,6 +299,6 @@ if __name__ == '__main__':
     print('  Params: ')
     for key, value in trial.params.items():
         print('    {}: {}'.format(key, value))
-
+    '''
     #test_predict()
-    #test_cfp_predict()
+    m5_predict()
