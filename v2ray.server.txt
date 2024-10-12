@@ -1,0 +1,33 @@
+jms-1:
+协议：shadows
+address:97.64.31.89
+port:17739
+password:HWu2WkNE6TRrJ3YL
+method:aes-256-gcm
+
+jms-2:
+协议：shadows
+address:104.194.74.208
+port:17739
+password:HWu2WkNE6TRrJ3YL
+method:aes-256-gcm
+
+jms-3:
+协议：vmess
+address：95.169.24.51 ：17,739
+id:ef03ea2f-f2c3-4558-8be3-fea4a7380dd4
+
+jms-4:
+协议：vmess
+address：23.106.142.140 ：17,739
+id:ef03ea2f-f2c3-4558-8be3-fea4a7380dd4
+
+jms-5:
+协议：vmess
+address：104.245.98.78 ：17,739
+id:ef03ea2f-f2c3-4558-8be3-fea4a7380dd4
+
+jms-6:
+协议：vmess
+address：45.62.111.168 ：17,739
+id:ef03ea2f-f2c3-4558-8be3-fea4a7380dd4
